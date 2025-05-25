@@ -1,75 +1,81 @@
 %option noyywrap
 
 %{
-    #include <string>
-    #include <memory>
-    #include "main.hpp"
+    #include <stdio.h>
+    #include <stdlib.h>
+    #include <string.h>
+    #include <errno.h>
+    #include "main.h"
     #include "cminus_lwy.tab.h"
-    using namespace std;
 
-    extern std::shared_ptr<SyntaxTree> syntaxTree;
-    extern bool analysisSuccessful;
+    extern SyntaxTree* syntaxTree;
+    extern int analysisSuccessful;
     int currentLine = 1;
 
-    // 错误处理器
-    class LexicalErrorHandler {
-    public:
-        static void reportError(const char* lexeme, const char* type, int line) {
-            analysisSuccessful = false;
-            printf("Error type A at Line %d: \"%s\" is not a valid %s\n", 
-                   line, lexeme, type);
-        }
-    };
-
-    // 数值转换器
-    class NumericConverter {
-    public:
-        static int toInteger(const char* str, int base = 10) {
-            try {
-                size_t pos = 0;
-                int result = std::stoi(str, &pos, base);
-                if (pos != strlen(str)) {
-                    throw std::invalid_argument("Invalid characters in input");
-                }
-                return result;
-            } catch (const std::exception&) {
-                LexicalErrorHandler::reportError(str, 
-                    base == 10 ? "decimal integer" : 
-                    base == 8 ? "octal integer" : "hexadecimal integer", currentLine);
-                return 0;
-            }
-        }
-
-        static float toFloat(const char* str) {
-            try {
-                size_t pos = 0;
-                float result = std::stof(str, &pos);
-                if (pos != strlen(str)) {
-                    throw std::invalid_argument("Invalid characters in input");
-                }
-                return result;
-            } catch (const std::exception&) {
-                LexicalErrorHandler::reportError(str, "floating-point number", currentLine);
-                return 0.0f;
-            }
-        }
-    };
-
-    // 创建Token节点
-    void createTokenNode(TreeNode*& node, const char* tokenName, NodeType type) {
-        node = TreeNode::createTokenNode(tokenName, currentLine, type);
+    // 报告词法错误
+    void reportLexicalError(const char* lexeme, const char* type, int line) {
+        analysisSuccessful = 0;
+        printf("Error type A at Line %d: \"%s\" is not a valid %s\n", 
+               line, lexeme, type);
     }
 
-    void createTokenNode(TreeNode*& node, const char* tokenName, int intValue) {
-        node = TreeNode::createIntValueNode(tokenName, currentLine, intValue);
+    // 数值转换函数
+    int toInteger(const char* str, int base) {
+        char* endptr;
+        errno = 0;
+        long val = strtol(str, &endptr, base);
+        
+        if ((errno == ERANGE && (val == LONG_MAX || val == LONG_MIN))
+            || (errno != 0 && val == 0)) {
+            reportLexicalError(str, 
+                base == 10 ? "decimal integer" : 
+                base == 8 ? "octal integer" : "hexadecimal integer", currentLine);
+            return 0;
+        }
+
+        if (endptr == str || *endptr != '\0') {
+            reportLexicalError(str, 
+                base == 10 ? "decimal integer" : 
+                base == 8 ? "octal integer" : "hexadecimal integer", currentLine);
+            return 0;
+        }
+        
+        return (int)val;
     }
 
-    void createTokenNode(TreeNode*& node, const char* tokenName, float floatValue) {
-        node = TreeNode::createFloatValueNode(tokenName, currentLine, floatValue);
+    float toFloat(const char* str) {
+        char* endptr;
+        errno = 0;
+        float val = strtof(str, &endptr);
+        
+        if ((errno == ERANGE) || (errno != 0 && val == 0)) {
+            reportLexicalError(str, "floating-point number", currentLine);
+            return 0.0f;
+        }
+
+        if (endptr == str || *endptr != '\0') {
+            reportLexicalError(str, "floating-point number", currentLine);
+            return 0.0f;
+        }
+        
+        return val;
     }
 
-    void createTokenNode(TreeNode*& node, const char* tokenName, string* idValue) {
-        node = TreeNode::createIdentifierNode(tokenName, currentLine, idValue);
+    // 创建Token节点的辅助函数
+    void createToken(YYSTYPE* yylval, const char* tokenName, NodeType type) {
+        yylval->node = createTokenNode(tokenName, currentLine, type);
+    }
+
+    void createIntToken(YYSTYPE* yylval, const char* tokenName, int intValue) {
+        yylval->node = createIntValueNode(tokenName, currentLine, intValue);
+    }
+
+    void createFloatToken(YYSTYPE* yylval, const char* tokenName, float floatValue) {
+        yylval->node = createFloatValueNode(tokenName, currentLine, floatValue);
+    }
+
+    void createIdToken(YYSTYPE* yylval, const char* tokenName, const char* idValue) {
+        yylval->node = createIdentifierNode(tokenName, currentLine, idValue);
     }
 %}
 
@@ -113,66 +119,65 @@ SEPARATOR   ;|,|\.|[\(\)\[\]\{\}]
 <COMMENT>.      { /* 忽略注释内容 */ }
 
  /* 关键字 */
-"int"           { createTokenNode(yylval.node, "TYPE", NodeType::INT_TYPE); return TYPE; }
-"float"         { createTokenNode(yylval.node, "TYPE", NodeType::FLOAT_TYPE); return TYPE; }
-"void"          { createTokenNode(yylval.node, "TYPE", NodeType::OTHER); return TYPE; }
-"if"            { createTokenNode(yylval.node, "IF", NodeType::OTHER); return IF; }
-"else"          { createTokenNode(yylval.node, "ELSE", NodeType::OTHER); return ELSE; }
-"while"         { createTokenNode(yylval.node, "WHILE", NodeType::OTHER); return WHILE; }
-"return"        { createTokenNode(yylval.node, "RETURN", NodeType::OTHER); return RETURN; }
-"struct"        { createTokenNode(yylval.node, "STRUCT", NodeType::OTHER); return STRUCT; }
+"int"           { createToken(&yylval, "TYPE", NODE_INT_TYPE); return TYPE; }
+"float"         { createToken(&yylval, "TYPE", NODE_FLOAT_TYPE); return TYPE; }
+"void"          { createToken(&yylval, "TYPE", NODE_OTHER); return TYPE; }
+"if"            { createToken(&yylval, "IF", NODE_OTHER); return IF; }
+"else"          { createToken(&yylval, "ELSE", NODE_OTHER); return ELSE; }
+"while"         { createToken(&yylval, "WHILE", NODE_OTHER); return WHILE; }
+"return"        { createToken(&yylval, "RETURN", NODE_OTHER); return RETURN; }
+"struct"        { createToken(&yylval, "STRUCT", NODE_OTHER); return STRUCT; }
 
  /* 错误的数字表示 */
 {BAD_OCTAL}     { 
-                  LexicalErrorHandler::reportError(yytext, "octal integer", currentLine); 
-                  createTokenNode(yylval.node, "INT", 0); 
+                  reportLexicalError(yytext, "octal integer", currentLine); 
+                  createIntToken(&yylval, "INT", 0); 
                   return INT; 
                 }
 {BAD_HEX}       { 
-                  LexicalErrorHandler::reportError(yytext, "hexadecimal integer", currentLine); 
-                  createTokenNode(yylval.node, "INT", 0); 
+                  reportLexicalError(yytext, "hexadecimal integer", currentLine); 
+                  createIntToken(&yylval, "INT", 0); 
                   return INT; 
                 }
 
  /* 有效数字 */
-{DECIMAL}       { createTokenNode(yylval.node, "INT", NumericConverter::toInteger(yytext, 10)); return INT; }
-{OCTAL}         { createTokenNode(yylval.node, "INT", NumericConverter::toInteger(yytext, 8)); return INT; }
-{HEXADECIMAL}   { createTokenNode(yylval.node, "INT", NumericConverter::toInteger(yytext, 16)); return INT; }
-{FLOAT}         { createTokenNode(yylval.node, "FLOAT", NumericConverter::toFloat(yytext)); return FLOAT; }
+{DECIMAL}       { createIntToken(&yylval, "INT", toInteger(yytext, 10)); return INT; }
+{OCTAL}         { createIntToken(&yylval, "INT", toInteger(yytext, 8)); return INT; }
+{HEXADECIMAL}   { createIntToken(&yylval, "INT", toInteger(yytext, 16)); return INT; }
+{FLOAT}         { createFloatToken(&yylval, "FLOAT", toFloat(yytext)); return FLOAT; }
 
  /* 运算符 */
-{ASSIGN}        { createTokenNode(yylval.node, "ASSIGNOP", NodeType::OTHER); return ASSIGNOP; }
-{COMPARE}       { createTokenNode(yylval.node, "RELOP", NodeType::OTHER); return RELOP; }
-"+"             { createTokenNode(yylval.node, "PLUS", NodeType::OTHER); return PLUS; }
-"-"             { createTokenNode(yylval.node, "MINUS", NodeType::OTHER); return MINUS; }
-"*"             { createTokenNode(yylval.node, "STAR", NodeType::OTHER); return STAR; }
-"/"             { createTokenNode(yylval.node, "DIV", NodeType::OTHER); return DIV; }
-"&&"            { createTokenNode(yylval.node, "AND", NodeType::OTHER); return AND; }
-"||"            { createTokenNode(yylval.node, "OR", NodeType::OTHER); return OR; }
-"!"             { createTokenNode(yylval.node, "NOT", NodeType::OTHER); return NOT; }
+{ASSIGN}        { createToken(&yylval, "ASSIGNOP", NODE_OTHER); return ASSIGNOP; }
+{COMPARE}       { createToken(&yylval, "RELOP", NODE_OTHER); return RELOP; }
+"+"             { createToken(&yylval, "PLUS", NODE_OTHER); return PLUS; }
+"-"             { createToken(&yylval, "MINUS", NODE_OTHER); return MINUS; }
+"*"             { createToken(&yylval, "STAR", NODE_OTHER); return STAR; }
+"/"             { createToken(&yylval, "DIV", NODE_OTHER); return DIV; }
+"&&"            { createToken(&yylval, "AND", NODE_OTHER); return AND; }
+"||"            { createToken(&yylval, "OR", NODE_OTHER); return OR; }
+"!"             { createToken(&yylval, "NOT", NODE_OTHER); return NOT; }
 
  /* 分隔符 */
-";"             { createTokenNode(yylval.node, "SEMI", NodeType::OTHER); return SEMI; }
-","             { createTokenNode(yylval.node, "COMMA", NodeType::OTHER); return COMMA; }
-"."             { createTokenNode(yylval.node, "DOT", NodeType::OTHER); return DOT; }
-"("             { createTokenNode(yylval.node, "LP", NodeType::OTHER); return LP; }
-")"             { createTokenNode(yylval.node, "RP", NodeType::OTHER); return RP; }
-"["             { createTokenNode(yylval.node, "LB", NodeType::OTHER); return LB; }
-"]"             { createTokenNode(yylval.node, "RB", NodeType::OTHER); return RB; }
-"{"             { createTokenNode(yylval.node, "LC", NodeType::OTHER); return LC; }
-"}"             { createTokenNode(yylval.node, "RC", NodeType::OTHER); return RC; }
+";"             { createToken(&yylval, "SEMI", NODE_OTHER); return SEMI; }
+","             { createToken(&yylval, "COMMA", NODE_OTHER); return COMMA; }
+"."             { createToken(&yylval, "DOT", NODE_OTHER); return DOT; }
+"("             { createToken(&yylval, "LP", NODE_OTHER); return LP; }
+")"             { createToken(&yylval, "RP", NODE_OTHER); return RP; }
+"["             { createToken(&yylval, "LB", NODE_OTHER); return LB; }
+"]"             { createToken(&yylval, "RB", NODE_OTHER); return RB; }
+"{"             { createToken(&yylval, "LC", NODE_OTHER); return LC; }
+"}"             { createToken(&yylval, "RC", NODE_OTHER); return RC; }
 
  /* 标识符 */
 {IDENTIFIER}    { 
-                  std::string* idName = new std::string(yytext);
-                  createTokenNode(yylval.node, "ID", idName);
+                  createIdToken(&yylval, "ID", yytext);
                   return ID; 
                 }
 
  /* 未识别的字符 */
 .               { 
-                  LexicalErrorHandler::reportError(yytext, "character", currentLine);
-                  analysisSuccessful = false;
+                  reportLexicalError(yytext, "character", currentLine);
+                  analysisSuccessful = 0;
                 }
 
-%%.in
+%%
