@@ -1,6 +1,6 @@
 # 编译器和编译选项
 CC = gcc
-CFLAGS = -std=c99 -Wall -I.
+CFLAGS = -std=gnu99 -Wall -I. -g
 
 # 目标和依赖
 TARGET = cminus_lwy
@@ -37,7 +37,7 @@ cminus_lwy.tab.o: cminus_lwy.tab.c
 .PHONY: clean debugbuild run
 
 # 调试构建
-debugbuild: CFLAGS += -DDEBUG_MODE -g
+debugbuild: CFLAGS += -DDEBUG_MODE
 debugbuild: clean all
 
 # 运行项目
